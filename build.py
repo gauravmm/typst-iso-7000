@@ -195,13 +195,33 @@ def process_svg(symbol: Symbol, force_process: bool = False):
 
     root = tree.getroot()
 
+    # Remove all elements and attributes with non-svg namespaces
+    for elem in root.xpath(".|.//*"):
+        # QName(elem).namespace returns the URI
+        if etree.QName(elem).namespace != "http://www.w3.org/2000/svg":
+            parent = elem.getparent()
+            if parent is not None:
+                parent.remove(elem)
+            continue
+
+        for attr_name in list(elem.attrib.keys()):
+            if "}" in attr_name:  # Namespaced attribute
+                local_name = etree.QName(attr_name).localname
+                value = elem.attrib[attr_name]
+                del elem.attrib[attr_name]
+                elem.attrib[local_name] = value
+
     # Remove gray stroke elements
     for parent in root.iter():
         for child in list(parent):
             tag = etree.QName(child).localname
-            stroke = child.get("stroke", "")
-            if tag in ("g", "path") and stroke in ("#999", "#999999"):
+            if tag == "defs":
                 parent.remove(child)
+            if tag in ("g", "path"):
+                if child.get("stroke", "").startswith("#999"):
+                    parent.remove(child)
+                elif "#999" in child.get("style", ""):
+                    parent.remove(child)
 
     # Handle viewBox and root size (width/height)
     width = root.get("width")
@@ -230,33 +250,6 @@ def process_svg(symbol: Symbol, force_process: bool = False):
 
     root.set("width", "10mm")
     root.set("height", "10mm")
-
-    # strip_namespaces = ["inkscape", "sodipodi", "ns1", "ns2"]
-    # Remove all elements and attributes with Inkscape or Sodipodi namespaces
-
-    for parent in root.iter():
-        # Remove child elements with unwanted namespaces
-        for child in list(parent):
-            print(child.tag)
-            if any(child.tag.startswith(ns) for ns in strip_namespaces):
-                parent.remove(child)
-        # Remove attributes with unwanted namespaces
-        for attr_name in list(parent.attrib.keys()):
-            if any(attr_name.startswith(ns) for ns in strip_namespaces):
-                del parent.attrib[attr_name]
-
-    # Strip out all namespace prefixes from element tags and attributes
-    # for elem in root.iter():
-    #    # Remove namespace from element tag (keep only local name)
-    #    elem.tag = etree.QName(elem).localname
-    #
-    #    # Remove namespace prefixes from attributes
-    #    for attr_name in list(elem.attrib.keys()):
-    #        if "}" in attr_name:  # Namespaced attribute
-    #            local_name = etree.QName(attr_name).localname
-    #            value = elem.attrib[attr_name]
-    #            del elem.attrib[attr_name]
-    #            elem.attrib[local_name] = value
 
     # Clean up unused namespace declarations
     etree.cleanup_namespaces(tree)
