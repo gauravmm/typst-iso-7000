@@ -66,10 +66,57 @@ def get_wikimedia():
     return all_pages
 
 
+def process_wikimedia(wiki_data):
+    """From each page, construct a dict with reference, title, user, url, license, description, etc.
+
+    Log an error if mime is not "image/svg+xml" or if the reference does not match the expected pattern.
+    """
+    import logging
+    import re
+
+    ref_pattern = re.compile(r"^ISO 7000 - Ref-No (\d+)$")
+    symbols = []
+
+    for page in wiki_data:
+        info = page["imageinfo"][0]
+        extmeta = info["extmetadata"]
+
+        if info["mime"] != "image/svg+xml":
+            logging.error(
+                "Page %s has unexpected mime type: %s", page["title"], info["mime"]
+            )
+            continue
+
+        obj_name = extmeta["ObjectName"]["value"]
+        m = ref_pattern.match(obj_name)
+        if not m:
+            logging.error(
+                "Page %s has unexpected ObjectName: %s", page["title"], obj_name
+            )
+            continue
+
+        symbols.append(
+            {
+                "reference": m.group(1),
+                "title": page["title"],
+                "user": info["user"],
+                "userid": info["userid"],
+                "url": info["url"],
+                "license": extmeta["LicenseShortName"]["value"],
+                "licenseUrl": extmeta.get("LicenseUrl", {}).get("value", ""),
+                "description": extmeta["ImageDescription"]["value"],
+                "descriptionurl": info["descriptionurl"],
+            }
+        )
+
+    return symbols
+
+
 def main(args):
     # Ensure dirs exist.
     # CACHE_WIKIMEDIA.parent.mkdir(parents=True, exist_ok=True)
     wiki_data = get_wikimedia()
+    symbols = process_wikimedia(wiki_data)
 
     print(f"Wikimedia Entries Loaded: {len(wiki_data)}")
 
