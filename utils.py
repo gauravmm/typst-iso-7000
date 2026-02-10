@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import logging
 
 
@@ -23,3 +24,24 @@ def setup_logging():
     handler.setFormatter(ColorFormatter("%(levelname)s %(message)s"))
     logging.root.addHandler(handler)
     logging.root.setLevel(logging.INFO)
+
+
+def get_svg_name(symbol: Symbol) -> str:
+    return f"{symbol.reference}.svg"
+
+
+@dataclass(frozen=True)
+class Symbol:
+    reference: str
+    title: str
+    user: str
+    userid: int
+    url: str
+    license: str
+    license_url: str
+    description: str
+    description_url: str
+
+    def __post_init__(self):
+        if not self.reference:
+            raise ValueError(f"Symbol reference must not be empty (title={self.title})")
