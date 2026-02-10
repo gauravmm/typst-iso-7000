@@ -15,6 +15,8 @@ from tqdm import tqdm
 
 from utils import setup_logging
 
+from svg import cleanup_svg
+
 SOURCES = Path("sources/").resolve()
 CACHE_WIKIMEDIA = SOURCES / "wikimedia.json.gz"
 CACHE_SVG = SOURCES / "raw"
@@ -166,7 +168,7 @@ def process_svg(symbol: Symbol, force_process: bool = False):
         return
 
     PROCESSED_SVG.mkdir(parents=True, exist_ok=True)
-    simplify_svg(CACHE_SVG / name, PROCESSED_SVG / name)
+    cleanup_svg(CACHE_SVG / name, PROCESSED_SVG / name)
 
 
 def main(args):

@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from lxml import etree
+from scour import scour
 
 
 def cleanup_svg(path: Path, output: Path):
@@ -100,9 +101,23 @@ def cleanup_svg(path: Path, output: Path):
     root.set("width", "10mm")
     root.set("height", "10mm")
 
-    tree.write(
-        str(output),
-        xml_declaration=True,
-        encoding="UTF-8",
-        pretty_print=True,
-    )
+    # Convert tree to string for scour processing
+    svg_data = etree.tostring(
+        tree, xml_declaration=True, encoding="UTF-8", pretty_print=False
+    ).decode("utf-8")
+
+    # Get scour options and customize
+    scour_options = scour.sanitizeOptions(options=None)
+    scour_options.remove_metadata = True
+    scour_options.strip_xml_prolog = True
+    scour_options.indent_type = "none"
+    scour_options.enable_viewboxing = True
+    scour_options.enable_id_stripping = True
+    scour_options.enable_comment_stripping = True
+    scour_options.shorten_ids = True
+
+    # Process the SVG with scour
+    clean_svg_data = scour.scourString(svg_data, options=scour_options)
+
+    # Write the optimized SVG to output
+    output.write_text(clean_svg_data, encoding="utf-8")
