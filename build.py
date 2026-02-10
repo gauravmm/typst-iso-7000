@@ -1,5 +1,6 @@
 #!python3
 import argparse
+import dataclasses
 import gzip
 import json
 import logging
@@ -21,6 +22,7 @@ SOURCES = Path("sources/").resolve()
 CACHE_WIKIMEDIA = SOURCES / "wikimedia.json.gz"
 CACHE_SVG = SOURCES / "raw"
 PROCESSED_SVG = Path("src") / "icons"
+PROCESSED_JSON = Path("src") / "icons.json"
 
 
 def get_wikimedia():
@@ -76,6 +78,22 @@ def get_wikimedia():
     return all_pages
 
 
+TAG_RE = [
+    re.compile(r"<[^>]+>"),
+    re.compile(r"^Symbol [\d]+[A-Z]? from ISO 7000( - )?(Title/Meaning(/Referent)?:)?"),
+    re.compile(r"^ISO 7000 - Ref-No [\d]+ "),
+]
+
+
+def clean_description(s: str) -> str:
+    s = re.compile("<br( /)?>").sub(r"\n", s)
+    s = re.compile("\n\n").sub(r"\n", s)
+    s = re.compile("\n\n").sub(r"\n", s)
+    for su in TAG_RE:
+        s = su.sub("", s)
+    return s
+
+
 def process_wikimedia(wiki_data) -> List[Symbol]:
     """From each page, construct a dict with reference, title, user, url, license, description, etc.
 
@@ -107,15 +125,38 @@ def process_wikimedia(wiki_data) -> List[Symbol]:
 
         ref = m.group(1).strip()
 
+        title = page["title"]
+        orig_description = extmeta["ImageDescription"]["value"]
+        description = description = clean_description(orig_description)
+
+        if orig_description.startswith("ISO 7000 - Ref-No"):
+            # Heuristically split this into a title
+            parts = description.split(";", 1)
+            if len(parts) == 1:
+                title = parts[0]
+            else:
+                title, description = parts
+
+        elif "Function/description:" in description:
+            description = clean_description(description)
+            parts = description.split("Function/description: ", 1)
+            if len(parts) == 1:
+                title = parts[0]
+            else:
+                title, description = parts
+
+        else:
+            logging.debug(f"Unknown description {description}")
+
         new = Symbol(
             reference=ref,
-            title=page["title"],
+            title=title.strip(),
             user=info["user"],
             userid=info["userid"],
             url=info["url"],
             license=extmeta["LicenseShortName"]["value"],
             license_url=extmeta.get("LicenseUrl", {}).get("value", ""),
-            description=extmeta["ImageDescription"]["value"],
+            description=description.strip(),
             description_url=info["descriptionurl"],
         )
 
@@ -134,6 +175,20 @@ def process_wikimedia(wiki_data) -> List[Symbol]:
 
 def download_svgs(symbols: Iterable[Symbol]):
     """Download the SVGs if they don't already exist in CACHE_SVG"""
+
+    CACHE_SVG_TAR = CACHE_SVG.with_suffix(".tgz")
+    if not CACHE_SVG.exists() and CACHE_SVG.with_suffix(".tgz").exists:
+        import tarfile
+
+        try:
+            with tarfile.open(CACHE_SVG_TAR, "r") as tar:
+                tar.extractall(path=CACHE_SVG.parent)
+            print(f"All SVGs extracted successfully to {CACHE_SVG}")
+        except tarfile.TarError as e:
+            print(f"An error occurred during extraction: {e}")
+            return
+
+    # Ensure the dir exists
     CACHE_SVG.mkdir(parents=True, exist_ok=True)
 
     def get_svg_path(s: Symbol):
@@ -175,14 +230,15 @@ def main(args):
     # Ensure dirs exist.
     wiki_data = get_wikimedia()
     symbols = process_wikimedia(wiki_data)
-    # download_svgs(symbols.values())
+    download_svgs(symbols)
 
     for s in tqdm(symbols, desc="Processing SVGs", unit=" files"):
         process_svg(s, args.force_process)
 
     # Produce output for the reference document:
+    PROCESSED_JSON.write_text(json.dumps([dataclasses.asdict(s) for s in symbols]))
 
-    print(f"Wikimedia Entries Loaded: {len(symbols)}")
+    print(f"ISO 7000 symbols processed: {len(symbols)}")
 
 
 if __name__ == "__main__":
