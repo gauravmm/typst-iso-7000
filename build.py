@@ -211,17 +211,26 @@ def process_svg(symbol: Symbol, force_process: bool = False):
                 del elem.attrib[attr_name]
                 elem.attrib[local_name] = value
 
-    # Remove gray stroke elements
-    for parent in root.iter():
-        for child in list(parent):
-            tag = etree.QName(child).localname
-            if tag == "defs":
-                parent.remove(child)
-            if tag in ("g", "path"):
-                if child.get("stroke", "").startswith("#999"):
-                    parent.remove(child)
-                elif "#999" in child.get("style", ""):
-                    parent.remove(child)
+    # Clean up unused namespace declarations
+    etree.cleanup_namespaces(tree)
+
+    # Remove gray stroke elements using XPath
+    # Remove <defs> elements
+    for elem in root.xpath(".//defs"):
+        elem.getparent().remove(elem)
+
+    # Remove <g> and <path> elements with gray strokes (#999 or #999999)
+    for elem_type in ("g", "path"):
+        for elem in root.xpath(
+            f".//*[local-name()='{elem_type}'][contains(@stroke, '#999')]"
+        ):
+            elem.getparent().remove(elem)
+
+        # Remove <g> and <path> elements with #999 in style attribute
+        for elem in root.xpath(
+            f".//*[local-name()='{elem_type}'][contains(@style, '#999')]"
+        ):
+            elem.getparent().remove(elem)
 
     # Handle viewBox and root size (width/height)
     width = root.get("width")
@@ -251,9 +260,6 @@ def process_svg(symbol: Symbol, force_process: bool = False):
     root.set("width", "10mm")
     root.set("height", "10mm")
 
-    # Clean up unused namespace declarations
-    etree.cleanup_namespaces(tree)
-
     PROCESSED_SVG.mkdir(parents=True, exist_ok=True)
     tree.write(
         str(PROCESSED_SVG / name),
@@ -276,7 +282,6 @@ def main(args):
 
 
 if __name__ == "__main__":
-    setup_logging()
     parser = argparse.ArgumentParser(
         description="Scrape Wikimedia for ISO 7000 icons and generate a Typst library."
     )
@@ -285,4 +290,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Repeat the SVG processing",
     )
-    main(parser.parse_args())
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
+    args = parser.parse_args()
+
+    setup_logging()
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    main(args)
