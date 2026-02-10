@@ -1,5 +1,4 @@
 #!python3
-
 import argparse
 import gzip
 import json
@@ -12,6 +11,7 @@ from pathlib import Path
 from pprint import pprint
 from typing import Dict, Iterable, List
 
+from lxml import etree
 from tqdm import tqdm
 
 from utils import setup_logging
@@ -188,61 +188,86 @@ def process_svg(symbol: Symbol, force_process: bool = False):
         return
 
     # Remove <{g|path} stroke="#999999"... /> and its descendants
-    from bs4 import BeautifulSoup
 
-    with open(CACHE_SVG / name, "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f, "xml")
+    tree = etree.parse(str(CACHE_SVG / name))
+    # Strip out all comments
+    etree.strip_elements(tree, etree.Comment, with_tail=False)
+
+    root = tree.getroot()
 
     # Remove gray stroke elements
-    for elem in soup.find_all(["g", "path"], attrs={"stroke": ("#999", "#999999")}):
-        elem.decompose()
+    for parent in root.iter():
+        for child in list(parent):
+            tag = etree.QName(child).localname
+            stroke = child.get("stroke", "")
+            if tag in ("g", "path") and stroke in ("#999", "#999999"):
+                parent.remove(child)
 
-    # Set the root size
-    svg = soup.find("svg")
-    if svg is None:
-        logging.error("No root SVG found!")
-        return
+    # Handle viewBox and root size (width/height)
+    width = root.get("width")
+    height = root.get("height")
+    viewBox = root.get("viewBox")
 
-    svg["width"] = "10mm"
-    svg["height"] = "10mm"
+    if not (width and height):
+        if not viewBox:
+            # Case 4: neither is set → report error and set defaults
+            logging.error(
+                f"{name}: Neither viewBox nor size attributes found, skipping..."
+            )
+            return
+    # Case 1: viewBox set, but not root size → set root size to 10mm x 10mm
+    elif not viewBox:
+        # Case 2: root size set, but not viewBox → set viewBox
+        try:
+            # Parse numeric values from width/height (strip units like px, mm, etc.)
+            root.set("viewBox", f"0 0 {float(width)} {float(height)}")
+        except ValueError:
+            logging.error(
+                f"{name}: Could not parse width/height ({width}, {height}), skipping..."
+            )
+            return
+    # Case 3: both are set → keep viewBox, set size to 10mm
 
-    # Remove namespace declarations from root
-    for attr_name in list(svg.attrs.keys()):
-        if attr_name.startswith("xmlns"):
-            del svg.attrs[attr_name]
-    # svg.attrs["xmlns"] = "http://www.w3.org/2000/svg"
+    root.set("width", "10mm")
+    root.set("height", "10mm")
 
+    # strip_namespaces = ["inkscape", "sodipodi", "ns1", "ns2"]
     # Remove all elements and attributes with Inkscape or Sodipodi namespaces
-    for elem in soup.find_all():
-        # Remove elements with unwanted namespace prefixes
-        if elem.prefix in ("inkscape", "sodipodi"):
-            elem.decompose()
-            continue
 
-        if elem.attrs:
-            # Remove attributes with unwanted namespace prefixes
-            for attr_name in list(elem.attrs.keys()):
-                if ":" in attr_name:
-                    prefix = attr_name.split(":")[0]
-                    if prefix in ("inkscape", "sodipodi"):
-                        del elem.attrs[attr_name]
+    for parent in root.iter():
+        # Remove child elements with unwanted namespaces
+        for child in list(parent):
+            print(child.tag)
+            if any(child.tag.startswith(ns) for ns in strip_namespaces):
+                parent.remove(child)
+        # Remove attributes with unwanted namespaces
+        for attr_name in list(parent.attrib.keys()):
+            if any(attr_name.startswith(ns) for ns in strip_namespaces):
+                del parent.attrib[attr_name]
 
-    # Strip out all namespaces, using only the default
-    for elem in soup.find_all():
-        # Remove namespace prefix from element name (e.g., svg:path -> path)
-        if ":" in elem.name:
-            elem.name = elem.name.split(":")[-1]
+    # Strip out all namespace prefixes from element tags and attributes
+    # for elem in root.iter():
+    #    # Remove namespace from element tag (keep only local name)
+    #    elem.tag = etree.QName(elem).localname
+    #
+    #    # Remove namespace prefixes from attributes
+    #    for attr_name in list(elem.attrib.keys()):
+    #        if "}" in attr_name:  # Namespaced attribute
+    #            local_name = etree.QName(attr_name).localname
+    #            value = elem.attrib[attr_name]
+    #            del elem.attrib[attr_name]
+    #            elem.attrib[local_name] = value
 
-        # Clean namespaced attributes (e.g., {'ns:href': '...'})
-        new_attrs = {}
-        for attr, value in elem.attrs.items():
-            clean_attr = attr.split(":")[-1]
-            new_attrs[clean_attr] = value
-        elem.attrs = new_attrs
+    # Clean up unused namespace declarations
+    etree.cleanup_namespaces(tree)
 
     PROCESSED_SVG.mkdir(parents=True, exist_ok=True)
-    with open(PROCESSED_SVG / name, "w", encoding="utf-8") as f:
-        f.write(soup.prettify())
+    tree.write(
+        str(PROCESSED_SVG / name),
+        xml_declaration=True,
+        encoding="UTF-8",
+        pretty_print=True,
+    )
 
 
 def main(args):
