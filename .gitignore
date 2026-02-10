@@ -2,6 +2,7 @@
 *.pdf
 *.json
 sources/raw/*.svg
+sources/processed/*.svg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -4,22 +4,26 @@ import argparse
 import gzip
 import json
 import logging
-from pprint import pprint
 import re
 import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from pprint import pprint
 from typing import Dict, Iterable, List
 
 from tqdm import tqdm
 
 from utils import setup_logging
 
-
 SOURCES = Path("sources/").resolve()
 CACHE_WIKIMEDIA = SOURCES / "wikimedia.json.gz"
 CACHE_SVG = SOURCES / "raw"
+PROCESSED_SVG = SOURCES / "processed"
+
+
+def get_svg_name(symbol: Symbol) -> str:
+    return f"{symbol.reference}.svg"
 
 
 @dataclass(frozen=True)
@@ -92,7 +96,7 @@ def get_wikimedia():
     return all_pages
 
 
-def process_wikimedia(wiki_data) -> Dict[str, Symbol]:
+def process_wikimedia(wiki_data) -> List[Symbol]:
     """From each page, construct a dict with reference, title, user, url, license, description, etc.
 
     Log DEBUG if mime is not "image/svg+xml" or if the reference does not match the expected pattern.
@@ -145,18 +149,18 @@ def process_wikimedia(wiki_data) -> Dict[str, Symbol]:
     if skipped:
         logging.info(f"Skipped {skipped} pages for incorrect name or type.")
 
-    return symbols
+    return sorted(symbols.values(), key=lambda s: s.reference)
 
 
 def download_svgs(symbols: Iterable[Symbol]):
     """Download the SVGs if they don't already exist in CACHE_SVG"""
     CACHE_SVG.mkdir(parents=True, exist_ok=True)
 
-    def _get_svg_path(symbol: Symbol) -> Path:
-        return CACHE_SVG / f"{symbol.reference}.svg"
+    def get_svg_path(s: Symbol):
+        return CACHE_SVG / get_svg_name(s)
 
     to_download = [
-        (s, _get_svg_path(s)) for s in symbols if not _get_svg_path(s).exists()
+        (s, get_svg_path(s)) for s in symbols if not get_svg_path(s).exists()
     ]
 
     if not to_download:
@@ -172,17 +176,50 @@ def download_svgs(symbols: Iterable[Symbol]):
         )
         with urllib.request.urlopen(req) as response:
             path.write_bytes(response.read())
-        time.sleep(5)
+        time.sleep(5)  # Limit set by Wikipedia
+
+
+def process_svg(symbol: Symbol, force_process: bool = False):
+    name = get_svg_name(symbol)
+    if not force_process and (PROCESSED_SVG / name).exists():
+        return
+    if not (CACHE_SVG / name).exists():
+        logging.debug(f"Skipped {name} as the SVG file is not downloaded.")
+        return
+
+    # Remove <{g|path} stroke="#999999"... /> and its descendants
+    from xml.etree import ElementTree as ET
+
+    tree = ET.parse(CACHE_SVG / name)
+    root = tree.getroot()
+    for parent in root.iter():
+        for child in list(parent):
+            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+            stroke = child.get("stroke", "")
+            if tag in ("g", "path") and stroke and stroke.startswith("#"):
+                if len(stroke) == 7:
+                    remove = stroke[1] > "6" and stroke[3] > "6" and stroke[5] > "6"
+                elif len(stroke) == 4:
+                    remove = stroke[1] > "6" and stroke[2] > "6" and stroke[3] > "6"
+                else:
+                    continue
+                if remove:
+                    parent.remove(child)
+    root.set("width", "10mm")
+    root.set("height", "10mm")
+
+    PROCESSED_SVG.mkdir(parents=True, exist_ok=True)
+    tree.write(PROCESSED_SVG / name, xml_declaration=True, encoding="UTF-8")
 
 
 def main(args):
     # Ensure dirs exist.
     wiki_data = get_wikimedia()
     symbols = process_wikimedia(wiki_data)
-    download_svgs(symbols.values())
+    # download_svgs(symbols.values())
 
-    # ensure_svgs = get_svgs(symbols)
-    # Ensure that all SVGs are downloaded:
+    for s in tqdm(symbols, desc="Processing SVGs", unit=" files"):
+        process_svg(s, args.force_process)
 
     print(f"Wikimedia Entries Loaded: {len(symbols)}")
 
@@ -193,8 +230,8 @@ if __name__ == "__main__":
         description="Scrape Wikimedia for ISO 7000 icons and generate a Typst library."
     )
     parser.add_argument(
-        "--force-search-again",
+        "--force-process",
         action="store_true",
-        help="Repeat the Wikimedia search to check if new documents are available.",
+        help="Repeat the SVG processing",
     )
     main(parser.parse_args())
