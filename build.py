@@ -1,10 +1,15 @@
 #!python3
 
-
 import argparse
+import json
+import time
+import urllib.request
 from pathlib import Path
 
-CACHE_WIKIMEDIA = Path("sources/wikimedia.json")
+from tqdm import tqdm
+
+SOURCES = Path("sources/").resolve()
+CACHE_WIKIMEDIA = SOURCES / "wikimedia.json"
 
 
 def get_wikimedia():
@@ -15,15 +20,56 @@ def get_wikimedia():
 
     Process <>.query.pages into a list and write them all to CACHE_WIKIMEDIA for later processing.
     """
-    pass
+    if CACHE_WIKIMEDIA.exists():
+        return json.loads(CACHE_WIKIMEDIA.read_text())
 
+    all_pages = []
+    offset = 0
 
-def _wikimedia_url(offset: int):
-    return f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=%22ISO%207000%20-%20Ref-No%22&&prop=imageinfo&gsroffset={offset}&iiprop=size|mime|url|user|userid&format=json"
+    def _wikimedia_url(offset: int = 0):
+        return f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=%22ISO%207000%20-%20Ref-No%22&&prop=imageinfo&gsroffset={offset}&iiprop=size|mime|url|user|userid&format=json"
+
+    pbar = tqdm(desc="Fetching Wikimedia metadata", unit=" pages")
+    while True:
+        # Fetch data from Wikimedia API
+        url = _wikimedia_url(offset)
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "typst-iso-7000/1.0 (https://github.com/gauravmm/typst-iso-7000)"
+            },
+        )
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        # Extract pages from the response and add to our list
+        if "query" in data and "pages" in data["query"]:
+            pages = data["query"]["pages"]
+            all_pages.extend(pages.values())
+            pbar.update(len(pages))
+
+        # Check if there are more results to fetch
+        if "continue" in data and "gsroffset" in data["continue"]:
+            offset = data["continue"]["gsroffset"]
+        else:
+            break
+
+        time.sleep(0.5)
+    pbar.close()
+
+    # Write all collected pages to the cache file
+    with open(CACHE_WIKIMEDIA, "w", encoding="utf-8") as f:
+        json.dump(all_pages, f, indent=2, ensure_ascii=False)
+
+    return all_pages
 
 
 def main(args):
-    pass
+    # Ensure dirs exist.
+    # CACHE_WIKIMEDIA.parent.mkdir(parents=True, exist_ok=True)
+    wiki_data = get_wikimedia()
+
+    print(f"Wikimedia Entries Loaded: {len(wiki_data)}")
 
 
 if __name__ == "__main__":
