@@ -188,28 +188,61 @@ def process_svg(symbol: Symbol, force_process: bool = False):
         return
 
     # Remove <{g|path} stroke="#999999"... /> and its descendants
-    from xml.etree import ElementTree as ET
+    from bs4 import BeautifulSoup
 
-    tree = ET.parse(CACHE_SVG / name)
-    root = tree.getroot()
-    for parent in root.iter():
-        for child in list(parent):
-            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            stroke = child.get("stroke", "")
-            if tag in ("g", "path") and stroke and stroke.startswith("#"):
-                if len(stroke) == 7:
-                    remove = stroke[1] > "6" and stroke[3] > "6" and stroke[5] > "6"
-                elif len(stroke) == 4:
-                    remove = stroke[1] > "6" and stroke[2] > "6" and stroke[3] > "6"
-                else:
-                    continue
-                if remove:
-                    parent.remove(child)
-    root.set("width", "10mm")
-    root.set("height", "10mm")
+    with open(CACHE_SVG / name, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f, "xml")
+
+    # Remove gray stroke elements
+    for elem in soup.find_all(["g", "path"], attrs={"stroke": ("#999", "#999999")}):
+        elem.decompose()
+
+    # Set the root size
+    svg = soup.find("svg")
+    if svg is None:
+        logging.error("No root SVG found!")
+        return
+
+    svg["width"] = "10mm"
+    svg["height"] = "10mm"
+
+    # Remove namespace declarations from root
+    for attr_name in list(svg.attrs.keys()):
+        if attr_name.startswith("xmlns"):
+            del svg.attrs[attr_name]
+    # svg.attrs["xmlns"] = "http://www.w3.org/2000/svg"
+
+    # Remove all elements and attributes with Inkscape or Sodipodi namespaces
+    for elem in soup.find_all():
+        # Remove elements with unwanted namespace prefixes
+        if elem.prefix in ("inkscape", "sodipodi"):
+            elem.decompose()
+            continue
+
+        if elem.attrs:
+            # Remove attributes with unwanted namespace prefixes
+            for attr_name in list(elem.attrs.keys()):
+                if ":" in attr_name:
+                    prefix = attr_name.split(":")[0]
+                    if prefix in ("inkscape", "sodipodi"):
+                        del elem.attrs[attr_name]
+
+    # Strip out all namespaces, using only the default
+    for elem in soup.find_all():
+        # Remove namespace prefix from element name (e.g., svg:path -> path)
+        if ":" in elem.name:
+            elem.name = elem.name.split(":")[-1]
+
+        # Clean namespaced attributes (e.g., {'ns:href': '...'})
+        new_attrs = {}
+        for attr, value in elem.attrs.items():
+            clean_attr = attr.split(":")[-1]
+            new_attrs[clean_attr] = value
+        elem.attrs = new_attrs
 
     PROCESSED_SVG.mkdir(parents=True, exist_ok=True)
-    tree.write(PROCESSED_SVG / name, xml_declaration=True, encoding="UTF-8")
+    with open(PROCESSED_SVG / name, "w", encoding="utf-8") as f:
+        f.write(soup.prettify())
 
 
 def main(args):
