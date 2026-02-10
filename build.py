@@ -19,7 +19,7 @@ from utils import setup_logging
 SOURCES = Path("sources/").resolve()
 CACHE_WIKIMEDIA = SOURCES / "wikimedia.json.gz"
 CACHE_SVG = SOURCES / "raw"
-PROCESSED_SVG = SOURCES / "processed"
+PROCESSED_SVG = Path("src") / "icons"
 
 
 def get_svg_name(symbol: Symbol) -> str:
@@ -207,8 +207,23 @@ def process_svg(symbol: Symbol, force_process: bool = False):
             continue
 
         for attr_name in list(elem.attrib.keys()):
-            if "}" in attr_name:  # Namespaced attribute
+            # Remove namespaced attributes or -inkscape prefixed attributes
+            if "}" in attr_name or attr_name.startswith("-inkscape"):
                 del elem.attrib[attr_name]
+
+        # Clean up -inkscape CSS properties from style attribute
+        if "style" in elem.attrib:
+            style = elem.attrib["style"]
+            # Remove -inkscape-* properties from CSS
+            style_parts = [
+                part.strip()
+                for part in style.split(";")
+                if part.strip() and not part.strip().startswith("-inkscape")
+            ]
+            if style_parts:
+                elem.attrib["style"] = "; ".join(style_parts)
+            else:
+                del elem.attrib["style"]
 
     # Clean up unused namespace declarations
     etree.cleanup_namespaces(tree)
@@ -287,6 +302,8 @@ def main(args):
 
     for s in tqdm(symbols, desc="Processing SVGs", unit=" files"):
         process_svg(s, args.force_process)
+
+    # Produce output for the reference document:
 
     print(f"Wikimedia Entries Loaded: {len(symbols)}")
 
