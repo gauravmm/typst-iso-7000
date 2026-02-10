@@ -198,7 +198,9 @@ def process_svg(symbol: Symbol, force_process: bool = False):
     # Remove all elements and attributes with non-svg namespaces
     for elem in root.xpath(".|.//*"):
         # QName(elem).namespace returns the URI
-        if etree.QName(elem).namespace != "http://www.w3.org/2000/svg":
+        if etree.QName(elem).namespace != "http://www.w3.org/2000/svg" or etree.QName(
+            elem
+        ).localname in ("defs",):
             parent = elem.getparent()
             if parent is not None:
                 parent.remove(elem)
@@ -206,10 +208,7 @@ def process_svg(symbol: Symbol, force_process: bool = False):
 
         for attr_name in list(elem.attrib.keys()):
             if "}" in attr_name:  # Namespaced attribute
-                local_name = etree.QName(attr_name).localname
-                value = elem.attrib[attr_name]
                 del elem.attrib[attr_name]
-                elem.attrib[local_name] = value
 
     # Clean up unused namespace declarations
     etree.cleanup_namespaces(tree)
@@ -231,6 +230,17 @@ def process_svg(symbol: Symbol, force_process: bool = False):
             f".//*[local-name()='{elem_type}'][contains(@style, '#999')]"
         ):
             elem.getparent().remove(elem)
+
+    # Repeatedly remove orphan <g> elements (groups with no element children)
+    while True:
+        # Find all <g> elements with no child elements (only text/whitespace allowed)
+        orphans = root.xpath(".//*[local-name()='g'][not(*)]")
+        if not orphans:
+            break
+        for elem in orphans:
+            parent = elem.getparent()
+            if parent is not None:
+                parent.remove(elem)
 
     # Handle viewBox and root size (width/height)
     width = root.get("width")
