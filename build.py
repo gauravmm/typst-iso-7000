@@ -1,6 +1,7 @@
 #!python3
 
 import argparse
+import gzip
 import json
 import time
 import urllib.request
@@ -9,7 +10,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 SOURCES = Path("sources/").resolve()
-CACHE_WIKIMEDIA = SOURCES / "wikimedia.json"
+CACHE_WIKIMEDIA = SOURCES / "wikimedia.json.gz"
 
 
 def get_wikimedia():
@@ -21,13 +22,14 @@ def get_wikimedia():
     Process <>.query.pages into a list and write them all to CACHE_WIKIMEDIA for later processing.
     """
     if CACHE_WIKIMEDIA.exists():
-        return json.loads(CACHE_WIKIMEDIA.read_text())
+        with gzip.open(CACHE_WIKIMEDIA, "rt", encoding="utf-8") as f:
+            return json.load(f)
 
     all_pages = []
     offset = 0
 
     def _wikimedia_url(offset: int = 0):
-        return f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=%22ISO%207000%20-%20Ref-No%22&&prop=imageinfo&gsroffset={offset}&iiprop=size|mime|url|user|userid&format=json"
+        return f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrlimit=50&gsrsearch=%22ISO%207000%20-%20Ref-No%22&&prop=imageinfo&gsroffset={offset}&iiprop=size|mime|url|user|userid|extmetadata&format=json"
 
     pbar = tqdm(desc="Fetching Wikimedia metadata", unit=" pages")
     while True:
@@ -54,11 +56,11 @@ def get_wikimedia():
         else:
             break
 
-        time.sleep(0.5)
+        time.sleep(0.2)
     pbar.close()
 
     # Write all collected pages to the cache file
-    with open(CACHE_WIKIMEDIA, "w", encoding="utf-8") as f:
+    with gzip.open(CACHE_WIKIMEDIA, "wt", encoding="utf-8") as f:
         json.dump(all_pages, f, indent=2, ensure_ascii=False)
 
     return all_pages
