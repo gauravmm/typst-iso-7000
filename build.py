@@ -21,8 +21,8 @@ from svg import cleanup_svg
 SOURCES = Path("sources/").resolve()
 CACHE_WIKIMEDIA = SOURCES / "wikimedia.json.gz"
 CACHE_SVG = SOURCES / "raw"
+PROCESSED_JSON = SOURCES / "icons.json"
 PROCESSED_SVG = Path("src") / "icons"
-PROCESSED_JSON = Path("src") / "icons.json"
 
 
 def get_wikimedia():

@@ -1,3 +1,3 @@
-#let iso-7000(name) = {
-  text(20pt, weight: "bold")[Hello, #name!]
+#let iso-7000(name, ..args) = {
+  image("icons/" + name + ".svg", ..args)
 }
